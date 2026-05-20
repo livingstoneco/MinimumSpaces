@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, master]
+    branches: [main]
   pull_request:
 
 concurrency:
@@ -18,7 +18,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        php: ['8.2', '8.3', '8.4']
+        # Keep in sync with https://www.php.net/supported-versions.php (PHP 8.2–8.5 as of 2026).
+        php: ['8.2', '8.3', '8.4', '8.5']
 
     steps:
       - uses: actions/checkout@v4
