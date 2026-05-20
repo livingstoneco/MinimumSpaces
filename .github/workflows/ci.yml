@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  phpunit:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.2', '8.3', '8.4']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          tools: composer:v2
+          coverage: none
+
+      - name: Install Composer dependencies
+        run: composer install --prefer-dist --no-interaction
+
+      - name: Run PHPUnit
+        run: composer test
+
+  # New patch tag on each push to main/master after all matrix jobs pass (not on PRs).
+  tag-release:
+    name: Tag patch release
+    needs: phpunit
+    if: >-
+      success() &&
+      github.event_name == 'push' &&
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create next patch tag
+        run: |
+          set -euo pipefail
+          git fetch --tags --force
+
+          # Highest X.Y.Z semver tag (ignores pre-release suffixes not matching this pattern).
+          latest="$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n 1 || true)"
+          if [[ -z "${latest}" ]]; then
+            latest="v0.0.0"
+          fi
+
+          ver="${latest#v}"
+          IFS=. read -r major minor patch <<< "${ver}"
+          patch=$((patch + 1))
+          new_tag="v${major}.${minor}.${patch}"
+
+          if git rev-parse "${new_tag}" >/dev/null 2>&1; then
+            echo "Tag ${new_tag} already exists; skipping."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${new_tag}" -m "Release ${new_tag}"
+          git push origin "refs/tags/${new_tag}"
+
+          echo "Pushed tag ${new_tag}"
